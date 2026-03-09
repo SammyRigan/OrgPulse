@@ -33,7 +33,7 @@ export function getStabilityState(average: number): StabilityState {
   if (average >= STABILITY_THRESHOLDS.moderate) {
     return {
       label: "Moderate Stability",
-      headerLabel: "Moderate Risk",
+      headerLabel: "Moderate Stability",
       color: COLORS.amberLight,
       barColor: COLORS.amber,
     };
