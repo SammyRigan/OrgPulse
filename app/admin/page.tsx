@@ -473,12 +473,12 @@ export default function AdminPage() {
             App Settings
           </button>
           <a
-            href="/"
+            href="/demo-analysis"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900"
           >
-            View Assessment
+            Demo analysis
           </a>
         </nav>
         <div className="border-t border-gray-100 p-4">
