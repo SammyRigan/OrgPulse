@@ -449,11 +449,11 @@ function AnalysisSection({
             Based on {invites.filter((i) => i.status === "completed").length}{" "}
             completed responses
           </p>
-          <ExecutiveHeader
-            globalScore={average}
-            stabilityLabel={stability.headerLabel}
-            stabilityColor={stability.barColor}
-          />
+        <ExecutiveHeader
+          averageScore={average}
+          stabilityLabel={stability.headerLabel}
+          stabilityColor={stability.barColor}
+        />
           <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
             <div className="space-y-6 lg:col-span-5">
               <PillarCard

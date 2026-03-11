@@ -1,9 +1,9 @@
 export const CATEGORIES = [
-  "Vision",
-  "Alignment",
-  "Performance",
-  "Cohesion",
-  "Systems",
+  "Vision Clarity",
+  "Strategic Alignment",
+  "Execution Speed",
+  "Team Cohesion",
+  "Process Efficiency",
   "Scalability",
 ] as const;
 
