@@ -24,7 +24,7 @@ export default function ExecutiveHeader({
       <div className="flex items-center gap-6 rounded-2xl border border-gray-200 bg-white px-6 py-3 shadow-sm">
         <div className="flex flex-col">
           <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
-            African Score
+            Resillience Quotient
           </span>
           <span className="text-3xl font-black text-gray-800">
             {averageScore}%
