@@ -1,56 +1,103 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { signOut } from "firebase/auth";
 import {
-  Building2,
-  Megaphone,
-  Settings,
-  LogOut,
-  Copy,
-  Check,
-  Plus,
-  ChevronDown,
   BarChart3,
+  Building2,
+  Check,
+  ChevronDown,
+  Component,
+  Copy,
+  Download,
+  FileText,
+  LogOut,
+  Megaphone,
+  Plus,
+  Printer,
+  Settings,
+  ShieldAlert,
   Target,
   Zap,
-  Component,
 } from "lucide-react";
+import ExecutiveHeader from "@/components/ExecutiveHeader";
+import PillarCard from "@/components/PillarCard";
+import StabilityBar from "@/components/StabilityBar";
 import { auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/useAuth";
-import {
-  getAverageScore,
-  getStabilityState,
-  getRadarData,
-  type Scores,
-} from "@/lib/utils";
-import ExecutiveHeader from "@/components/ExecutiveHeader";
-import StabilityBar from "@/components/StabilityBar";
-import PillarCard from "@/components/PillarCard";
-import {
-  getOrganizationByAdminUid,
-  updateOrganization,
-  getCampaignsByOrgId,
-  addCampaign,
-  getInvitesByCampaign,
-  addInvites,
-  aggregateCampaignResponses,
-  type Organization,
-  type Campaign,
-  type Invite,
-} from "@/lib/firestore";
+import { getRadarData, type Scores } from "@/lib/utils";
 
 const RadarChart = dynamic(() => import("@/components/RadarChart"), { ssr: false });
 
-export default function OrgDashboardPage() {
+type Organization = {
+  id: string;
+  name: string;
+  thresholdPercent: number;
+  useDefaultQuestions: boolean;
+};
+
+type Campaign = {
+  id: string;
+  orgId: string;
+  name: string;
+  status: "draft" | "active" | "closed";
+  passcode?: string;
+  createdAt?: string;
+};
+
+type Invite = {
+  id: string;
+  email: string;
+  token?: string;
+  link?: string;
+  status: "pending" | "completed";
+  emailStatus?: "pending" | "sent" | "failed" | "not_configured";
+  lastEmailError?: string;
+};
+
+type Report = {
+  id: string;
+  orgId: string;
+  campaignId: string;
+  campaignName: string;
+  orgName: string;
+  scores: Scores;
+  averageScore: number;
+  stabilityLabel: string;
+  stabilityHeaderLabel: string;
+  completionCount: number;
+  inviteCount: number;
+  thresholdPercent: number;
+  qualitativeResponses: { question: string; answer: string; scoreKey?: string; variableKey?: string }[];
+  contextVariables: { variableKey: string; question: string; averageScore: number; count: number }[];
+  validationSignals: { variableKey: string; question: string; averageScore: number; count: number }[];
+  generatedAt?: string;
+};
+
+type Section = "profile" | "campaigns" | "analysis";
+
+function LoadingScreen() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-gray-50">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#D97706] border-t-transparent" />
+    </div>
+  );
+}
+
+function OrgDashboardContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestedOrgId = searchParams.get("orgId");
+  const requestedImpersonation = searchParams.get("impersonating") === "1";
   const { user, loading: authLoading } = useAuth();
   const [org, setOrg] = useState<Organization | null>(null);
-  const [orgLoadError, setOrgLoadError] = useState(false);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [section, setSection] = useState<"profile" | "campaigns" | "analysis">("profile");
+  const [reports, setReports] = useState<Report[]>([]);
+  const [impersonating, setImpersonating] = useState(false);
+  const [actorEmail, setActorEmail] = useState<string | undefined>();
+  const [section, setSection] = useState<Section>("profile");
   const [profileName, setProfileName] = useState("");
   const [profileThreshold, setProfileThreshold] = useState(80);
   const [profileSaving, setProfileSaving] = useState(false);
@@ -62,10 +109,45 @@ export default function OrgDashboardPage() {
   const [addingInvites, setAddingInvites] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
   const [invitesRefreshKey, setInvitesRefreshKey] = useState(0);
-  const [analysisCampaign, setAnalysisCampaign] = useState<{
-    campaign: Campaign;
-    invites: Invite[];
-  } | null>(null);
+  const [selectedReport, setSelectedReport] = useState<Report | null>(null);
+  const [orgLoadError, setOrgLoadError] = useState("");
+
+  const authedFetch = useCallback(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (!user) throw new Error("Not signed in");
+      const token = await user.getIdToken();
+      return fetch(input, {
+        ...init,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          ...init?.headers,
+        },
+      });
+    },
+    [user]
+  );
+
+  const loadContext = useCallback(async () => {
+    if (!user) return;
+    const params = requestedOrgId ? `?orgId=${encodeURIComponent(requestedOrgId)}` : "";
+    const response = await authedFetch(`/api/org/context${params}`);
+    if (!response.ok) throw new Error(await response.text());
+    const data = (await response.json()) as {
+      org: Organization;
+      campaigns: Campaign[];
+      reports: Report[];
+      impersonating: boolean;
+      actorEmail?: string;
+    };
+    setOrg(data.org);
+    setCampaigns(data.campaigns);
+    setReports(data.reports);
+    setImpersonating(data.impersonating);
+    setActorEmail(data.actorEmail);
+    setProfileName(data.org.name);
+    setProfileThreshold(data.org.thresholdPercent);
+  }, [authedFetch, requestedOrgId, user]);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -73,78 +155,91 @@ export default function OrgDashboardPage() {
       return;
     }
     if (!user) return;
-    setOrgLoadError(false);
-    const run = async () => {
-      try {
-        await user.getIdToken(true);
-        const o = await getOrganizationByAdminUid(user.uid);
-        if (!o) router.replace("/org");
-        else {
-          setOrg(o);
-          setProfileName(o.name);
-          setProfileThreshold(o.thresholdPercent);
-          getCampaignsByOrgId(o.id).then(setCampaigns);
-        }
-      } catch {
-        setOrgLoadError(true);
-      }
-    };
-    run();
-  }, [user, authLoading, router]);
+
+    setOrgLoadError("");
+    loadContext().catch((error) => {
+      console.error(error);
+      setOrgLoadError("Failed to load organization.");
+    });
+  }, [authLoading, loadContext, router, user]);
 
   const handleSignOut = async () => {
     await signOut(auth);
     router.replace("/org");
   };
 
-  const handleSaveProfile = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleExitImpersonation = async () => {
+    if (requestedOrgId) {
+      await authedFetch("/api/admin/impersonation", {
+        method: "POST",
+        body: JSON.stringify({ orgId: requestedOrgId, action: "end" }),
+      }).catch(() => undefined);
+    }
+    router.replace("/admin");
+  };
+
+  const handleSaveProfile = async (event: React.FormEvent) => {
+    event.preventDefault();
     if (!org) return;
     setProfileSaving(true);
     try {
-      await updateOrganization(org.id, {
-        name: profileName.trim(),
-        thresholdPercent: profileThreshold,
+      const response = await authedFetch("/api/org/context", {
+        method: "PATCH",
+        body: JSON.stringify({
+          orgId: org.id,
+          name: profileName.trim(),
+          thresholdPercent: profileThreshold,
+        }),
       });
-      setOrg((prev) =>
-        prev ? { ...prev, name: profileName.trim(), thresholdPercent: profileThreshold } : null
-      );
+      if (!response.ok) throw new Error(await response.text());
+      await loadContext();
     } finally {
       setProfileSaving(false);
     }
   };
 
-  const handleCreateCampaign = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleCreateCampaign = async (event: React.FormEvent) => {
+    event.preventDefault();
     if (!org || !newCampaignName.trim()) return;
     setCreatingCampaign(true);
     try {
-      const passcode = newCampaignPasscode.trim() || undefined;
-      const id = await addCampaign({ orgId: org.id, name: newCampaignName.trim(), passcode });
-      setCampaigns((prev) => [
-        { id, orgId: org.id, name: newCampaignName.trim(), status: "active", passcode, createdAt: new Date() },
-        ...prev,
-      ]);
+      const response = await authedFetch("/api/org/campaigns", {
+        method: "POST",
+        body: JSON.stringify({
+          orgId: org.id,
+          name: newCampaignName.trim(),
+          passcode: newCampaignPasscode.trim() || undefined,
+        }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const data = (await response.json()) as { campaign: Campaign };
+      setCampaigns((prev) => [data.campaign, ...prev]);
       setNewCampaignName("");
       setNewCampaignPasscode("");
-      setExpandedCampaign(id);
+      setExpandedCampaign(data.campaign.id);
     } finally {
       setCreatingCampaign(false);
     }
   };
 
-  const handleAddInvites = async (campaignId: string, passcode?: string) => {
+  const handleAddInvites = async (campaignId: string) => {
+    if (!org) return;
     const emails = inviteEmails
       .split(/[\n,;]+/)
-      .map((e) => e.trim().toLowerCase())
+      .map((entry) => entry.trim().toLowerCase())
       .filter(Boolean);
-    if (!emails.length || !org) return;
+    if (!emails.length) return;
+
     setAddingInvites(campaignId);
     try {
-      await addInvites(org.id, campaignId, emails, passcode);
+      const response = await authedFetch("/api/org/invites", {
+        method: "POST",
+        body: JSON.stringify({ orgId: org.id, campaignId, emails }),
+      });
+      if (!response.ok) throw new Error(await response.text());
       setInviteEmails("");
       setExpandedCampaign(campaignId);
-      setInvitesRefreshKey((k) => k + 1);
+      setInvitesRefreshKey((key) => key + 1);
     } finally {
       setAddingInvites(null);
     }
@@ -160,37 +255,48 @@ export default function OrgDashboardPage() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50 p-4">
         <div className="max-w-md rounded-2xl border border-gray-200 bg-white p-8 text-center shadow-sm">
-          <h2 className="text-lg font-semibold text-gray-900">Failed to load organization</h2>
-          <p className="mt-2 text-gray-500">
-            Please try again or sign out and sign back in.
-          </p>
+          <h2 className="text-lg font-semibold text-gray-900">{orgLoadError}</h2>
+          <p className="mt-2 text-gray-500">Please try again or sign out and sign back in.</p>
           <button
-            onClick={() => window.location.reload()}
+            onClick={() => loadContext()}
             className="mt-4 rounded-lg bg-[#D97706] px-4 py-2 text-sm font-medium text-white hover:bg-amber-600"
           >
             Retry
           </button>
           <button
-            onClick={handleSignOut}
+            onClick={impersonating ? handleExitImpersonation : handleSignOut}
             className="ml-2 mt-4 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
-            Sign out
+            {impersonating ? "Exit workspace" : "Sign out"}
           </button>
         </div>
       </div>
     );
   }
 
-  if (authLoading || !org) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#D97706] border-t-transparent" />
-      </div>
-    );
-  }
+  if (authLoading || !org) return <LoadingScreen />;
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {impersonating && requestedImpersonation && (
+        <div className="border-b border-amber-200 bg-amber-50">
+          <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 text-sm text-amber-900">
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="h-4 w-4" />
+              <span>
+                Super admin {actorEmail ?? "session"} is inside {org.name}. Actions are audited.
+              </span>
+            </div>
+            <button
+              onClick={handleExitImpersonation}
+              className="rounded-lg border border-amber-300 px-3 py-1.5 font-medium hover:bg-amber-100"
+            >
+              Exit organization
+            </button>
+          </div>
+        </div>
+      )}
+
       <header className="border-b border-gray-200 bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
           <h1 className="text-xl font-bold text-gray-900">
@@ -198,13 +304,15 @@ export default function OrgDashboardPage() {
           </h1>
           <div className="flex items-center gap-4">
             <span className="text-sm text-gray-600">{org.name}</span>
-            <button
-              onClick={handleSignOut}
-              className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-            >
-              <LogOut className="h-4 w-4" />
-              Sign out
-            </button>
+            {!impersonating && (
+              <button
+                onClick={handleSignOut}
+                className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                <LogOut className="h-4 w-4" />
+                Sign out
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -212,39 +320,18 @@ export default function OrgDashboardPage() {
       <nav className="border-b border-gray-200 bg-white">
         <div className="mx-auto max-w-6xl px-4">
           <div className="flex gap-1">
-            <button
-              onClick={() => setSection("profile")}
-              className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium ${
-                section === "profile"
-                  ? "border-[#D97706] text-[#D97706]"
-                  : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
-              }`}
-            >
+            <NavButton active={section === "profile"} onClick={() => setSection("profile")}>
               <Settings className="h-4 w-4" />
               Profile
-            </button>
-            <button
-              onClick={() => setSection("campaigns")}
-              className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium ${
-                section === "campaigns"
-                  ? "border-[#D97706] text-[#D97706]"
-                  : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
-              }`}
-            >
+            </NavButton>
+            <NavButton active={section === "campaigns"} onClick={() => setSection("campaigns")}>
               <Megaphone className="h-4 w-4" />
               Send Invites
-            </button>
-            <button
-              onClick={() => setSection("analysis")}
-              className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium ${
-                section === "analysis"
-                  ? "border-[#D97706] text-[#D97706]"
-                  : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
-              }`}
-            >
+            </NavButton>
+            <NavButton active={section === "analysis"} onClick={() => setSection("analysis")}>
               <BarChart3 className="h-4 w-4" />
-              Analysis
-            </button>
+              Analysis & Reports
+            </NavButton>
           </div>
         </div>
       </nav>
@@ -264,24 +351,24 @@ export default function OrgDashboardPage() {
                 <input
                   type="text"
                   value={profileName}
-                  onChange={(e) => setProfileName(e.target.value)}
+                  onChange={(event) => setProfileName(event.target.value)}
                   className="w-full rounded-lg border border-gray-300 px-4 py-2.5 focus:border-[#D97706] focus:outline-none focus:ring-1 focus:ring-[#D97706]"
                 />
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium text-gray-700">
-                  Threshold %
+                  Completion threshold (%)
                 </label>
                 <input
                   type="number"
-                  min={0}
+                  min={1}
                   max={100}
                   value={profileThreshold}
-                  onChange={(e) => setProfileThreshold(Number(e.target.value) || 80)}
-                  className="w-full rounded-lg border border-gray-300 px-4 py-2.5 focus:border-[#D97706] focus:outline-none focus:ring-1 focus:ring-[#D97706]"
+                  onChange={(event) => setProfileThreshold(parseInt(event.target.value, 10) || 80)}
+                  className="w-24 rounded-lg border border-gray-300 px-4 py-2.5 focus:border-[#D97706] focus:outline-none focus:ring-1 focus:ring-[#D97706]"
                 />
                 <p className="mt-1 text-xs text-gray-500">
-                  Health score below this is considered at risk
+                  Analysis can be generated once this percentage of invitees completes the assessment.
                 </p>
               </div>
               <button
@@ -305,31 +392,26 @@ export default function OrgDashboardPage() {
                 <input
                   type="text"
                   value={newCampaignName}
-                  onChange={(e) => setNewCampaignName(e.target.value)}
-                  placeholder="Campaign name (e.g. Q1 2025 Pulse)"
+                  onChange={(event) => setNewCampaignName(event.target.value)}
+                  placeholder="Campaign name (e.g. Q1 Pulse)"
                   className="flex-1 rounded-lg border border-gray-300 px-4 py-2.5 focus:border-[#D97706] focus:outline-none focus:ring-1 focus:ring-[#D97706]"
                 />
                 <input
                   type="text"
                   value={newCampaignPasscode}
-                  onChange={(e) => setNewCampaignPasscode(e.target.value)}
+                  onChange={(event) => setNewCampaignPasscode(event.target.value)}
                   placeholder="Passcode (optional)"
-                  className="w-40 rounded-lg border border-gray-300 px-4 py-2.5 focus:border-[#D97706] focus:outline-none focus:ring-1 focus:ring-[#D97706]"
+                  className="w-48 rounded-lg border border-gray-300 px-4 py-2.5 focus:border-[#D97706] focus:outline-none focus:ring-1 focus:ring-[#D97706]"
                 />
               </div>
-              <div className="flex items-center gap-4">
-                <button
-                  type="submit"
-                  disabled={creatingCampaign || !newCampaignName.trim()}
-                  className="flex items-center gap-2 rounded-lg bg-[#D97706] px-5 py-2.5 font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
-                >
-                  <Plus className="h-4 w-4" />
-                  {creatingCampaign ? "Creating..." : "Create campaign"}
-                </button>
-                <span className="text-sm text-gray-500">
-                  Passcode protects access; leave blank for open access
-                </span>
-              </div>
+              <button
+                type="submit"
+                disabled={creatingCampaign || !newCampaignName.trim()}
+                className="flex items-center gap-2 rounded-lg bg-[#D97706] px-5 py-2.5 font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
+              >
+                <Plus className="h-4 w-4" />
+                {creatingCampaign ? "Creating..." : "Create campaign"}
+              </button>
             </form>
 
             <div className="space-y-4">
@@ -338,19 +420,19 @@ export default function OrgDashboardPage() {
                   key={campaign.id}
                   campaign={campaign}
                   orgId={org.id}
+                  authedFetch={authedFetch}
                   invitesRefreshKey={invitesRefreshKey}
                   expanded={expandedCampaign === campaign.id}
                   onToggle={() =>
-                    setExpandedCampaign((prev) =>
-                      prev === campaign.id ? null : campaign.id
-                    )
+                    setExpandedCampaign((prev) => (prev === campaign.id ? null : campaign.id))
                   }
                   inviteEmails={inviteEmails}
                   setInviteEmails={setInviteEmails}
-                  onAddInvites={() => handleAddInvites(campaign.id, campaign.passcode)}
+                  onAddInvites={() => handleAddInvites(campaign.id)}
                   addingInvites={addingInvites === campaign.id}
                   copiedLink={copiedLink}
                   onCopyLink={copyLink}
+                  showTechnicalDetails={impersonating}
                 />
               ))}
               {campaigns.length === 0 && (
@@ -366,12 +448,11 @@ export default function OrgDashboardPage() {
           <AnalysisSection
             org={org}
             campaigns={campaigns}
-            onSelectCampaign={async (campaign) => {
-              const invites = await getInvitesByCampaign(campaign.id);
-              setAnalysisCampaign({ campaign, invites });
-            }}
-            analysisCampaign={analysisCampaign}
-            onBack={() => setAnalysisCampaign(null)}
+            reports={reports}
+            selectedReport={selectedReport}
+            setSelectedReport={setSelectedReport}
+            authedFetch={authedFetch}
+            onReportsChanged={loadContext}
           />
         )}
       </main>
@@ -379,171 +460,33 @@ export default function OrgDashboardPage() {
   );
 }
 
-function AnalysisSection({
-  org,
-  campaigns,
-  onSelectCampaign,
-  analysisCampaign,
-  onBack,
+function NavButton({
+  active,
+  onClick,
+  children,
 }: {
-  org: Organization;
-  campaigns: Campaign[];
-  onSelectCampaign: (campaign: Campaign) => void;
-  analysisCampaign: { campaign: Campaign; invites: Invite[] } | null;
-  onBack: () => void;
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
 }) {
-  const [eligible, setEligible] = useState<
-    { campaign: Campaign; completed: number; total: number }[]
-  >([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (campaigns.length === 0) {
-      setEligible([]);
-      setLoading(false);
-      return;
-    }
-    let cancelled = false;
-    const run = async () => {
-      const result: { campaign: Campaign; completed: number; total: number }[] = [];
-      for (const campaign of campaigns) {
-        const invites = await getInvitesByCampaign(campaign.id);
-        const total = invites.length;
-        const completed = invites.filter((i) => i.status === "completed").length;
-        const pct = total > 0 ? (completed / total) * 100 : 0;
-        if (total > 0 && pct >= org.thresholdPercent && !cancelled) {
-          result.push({ campaign, completed, total });
-        }
-      }
-      if (!cancelled) setEligible(result);
-      setLoading(false);
-    };
-    setLoading(true);
-    run();
-    return () => {
-      cancelled = true;
-    };
-  }, [campaigns, org.thresholdPercent]);
-
-  if (analysisCampaign) {
-    const { campaign, invites } = analysisCampaign;
-    const scores = aggregateCampaignResponses(invites) as Scores;
-    const average = getAverageScore(scores);
-    const stability = getStabilityState(average);
-    const radarData = getRadarData(scores);
-    const noop = () => {};
-
-    return (
-      <div className="space-y-6">
-        <button
-          onClick={onBack}
-          className="text-sm font-medium text-[#D97706] hover:underline"
-        >
-          ← Back to campaigns
-        </button>
-        <div>
-          <h2 className="mb-2 text-xl font-semibold text-gray-900">
-            {campaign.name} – aggregated analysis
-          </h2>
-          <p className="mb-6 text-sm text-gray-500">
-            Based on {invites.filter((i) => i.status === "completed").length}{" "}
-            completed responses
-          </p>
-        <ExecutiveHeader
-          averageScore={average}
-          stabilityLabel={stability.headerLabel}
-          stabilityColor={stability.barColor}
-        />
-          <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
-            <div className="space-y-6 lg:col-span-5">
-              <PillarCard
-                title="1. Vision & Alignment"
-                icon={Target}
-                inputs={[
-                  { id: "vision", label: "Vision Clarity", value: scores.vision, onChange: noop },
-                  { id: "alignment", label: "Strategic Alignment", value: scores.alignment, onChange: noop },
-                ]}
-              />
-              <PillarCard
-                title="2. Team Performance"
-                icon={Zap}
-                inputs={[
-                  { id: "performance", label: "Execution Speed", value: scores.performance, onChange: noop },
-                  { id: "cohesion", label: "Team Cohesion", value: scores.cohesion, onChange: noop },
-                ]}
-              />
-              <PillarCard
-                title="3. Systems & Structure"
-                icon={Component}
-                inputs={[
-                  { id: "processes", label: "Process Efficiency", value: scores.processes, onChange: noop },
-                  { id: "scalability", label: "Scalability", value: scores.scalability, onChange: noop },
-                ]}
-              />
-            </div>
-            <div className="lg:col-span-7">
-              <div className="relative flex h-full min-h-[400px] flex-col overflow-hidden rounded-3xl bg-[#1A1A1A] p-10 text-white shadow-2xl">
-                <div className="relative z-10 mb-8">
-                  <h2 className="mb-2 text-3xl font-bold">Health Profile Analysis</h2>
-                  <p className="text-sm text-gray-400">
-                    Aggregated visualization of organizational pillars
-                  </p>
-                </div>
-                <div className="relative z-10 flex flex-1 items-center justify-center">
-                  <RadarChart data={radarData} />
-                </div>
-                <StabilityBar
-                  value={average}
-                  label={stability.label}
-                  barColor={stability.barColor}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-6">
-      <p className="text-gray-600">
-        Generate analysis for campaigns where enough invitees have completed the
-        assessment (≥{org.thresholdPercent}% completion).
-      </p>
-      {loading ? (
-        <div className="flex justify-center py-12">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#D97706] border-t-transparent" />
-        </div>
-      ) : eligible.length === 0 ? (
-        <p className="rounded-2xl border border-dashed border-gray-300 bg-white py-12 text-center text-gray-500">
-          No campaigns meet the threshold yet. Send invites and wait for enough
-          responses.
-        </p>
-      ) : (
-        <div className="space-y-3">
-          {eligible.map(({ campaign, completed, total }) => (
-            <button
-              key={campaign.id}
-              type="button"
-              onClick={() => onSelectCampaign(campaign)}
-              className="flex w-full items-center justify-between rounded-xl border border-gray-200 bg-white px-6 py-4 text-left shadow-sm transition-colors hover:border-[#D97706] hover:bg-amber-50/50"
-            >
-              <span className="font-semibold text-gray-900">{campaign.name}</span>
-              <span className="text-sm text-gray-500">
-                {completed}/{total} completed – Generate analysis →
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium ${
+        active
+          ? "border-[#D97706] text-[#D97706]"
+          : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 
 function CampaignCard({
   campaign,
   orgId,
+  authedFetch,
   invitesRefreshKey,
   expanded,
   onToggle,
@@ -553,26 +496,36 @@ function CampaignCard({
   addingInvites,
   copiedLink,
   onCopyLink,
+  showTechnicalDetails,
 }: {
   campaign: Campaign;
   orgId: string;
+  authedFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   invitesRefreshKey: number;
   expanded: boolean;
   onToggle: () => void;
   inviteEmails: string;
-  setInviteEmails: (v: string) => void;
+  setInviteEmails: (value: string) => void;
   onAddInvites: () => void;
   addingInvites: boolean;
   copiedLink: string | null;
   onCopyLink: (link: string) => void;
+  showTechnicalDetails: boolean;
 }) {
   const [invites, setInvites] = useState<Invite[]>([]);
 
   useEffect(() => {
-    if (expanded) getInvitesByCampaign(campaign.id).then(setInvites);
-  }, [campaign.id, expanded, invitesRefreshKey]);
+    if (!expanded) return;
+    authedFetch(`/api/org/campaigns/${campaign.id}/invites?orgId=${encodeURIComponent(orgId)}`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error(await response.text());
+        return response.json() as Promise<{ invites: Invite[] }>;
+      })
+      .then((data) => setInvites(data.invites))
+      .catch((error) => console.error(error));
+  }, [authedFetch, campaign.id, expanded, invitesRefreshKey, orgId]);
 
-  const completed = invites.filter((i) => i.status === "completed").length;
+  const completed = invites.filter((invite) => invite.status === "completed").length;
   const total = invites.length;
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
 
@@ -605,7 +558,7 @@ function CampaignCard({
               </label>
               <textarea
                 value={inviteEmails}
-                onChange={(e) => setInviteEmails(e.target.value)}
+                onChange={(event) => setInviteEmails(event.target.value)}
                 placeholder="alice@company.com&#10;bob@company.com"
                 rows={3}
                 className="w-full rounded-lg border border-gray-300 px-4 py-2.5 focus:border-[#D97706] focus:outline-none focus:ring-1 focus:ring-[#D97706]"
@@ -617,50 +570,67 @@ function CampaignCard({
               disabled={addingInvites || !inviteEmails.trim()}
               className="rounded-lg bg-[#D97706] px-4 py-2.5 font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
             >
-              {addingInvites ? "Adding..." : "Add invites"}
+              {addingInvites ? "Sending..." : "Send invites"}
             </button>
           </div>
           {invites.length > 0 && (
             <div className="space-y-2">
-              <p className="text-sm font-medium text-gray-700">Invite links</p>
-              <div className="max-h-48 space-y-2 overflow-y-auto rounded-lg border border-gray-100 bg-gray-50 p-3">
-                {invites.map((inv) => {
+              <p className="text-sm font-medium text-gray-700">
+                {showTechnicalDetails ? "Invite delivery" : "Invitees"}
+              </p>
+              <div className="max-h-56 space-y-2 overflow-y-auto rounded-lg border border-gray-100 bg-gray-50 p-3">
+                {invites.map((invite) => {
                   const link =
-                    typeof window !== "undefined"
-                      ? `${window.location.origin}/assess?token=${inv.token}`
-                      : "";
+                    invite.link ??
+                    (invite.token ? `${window.location.origin}/assess?token=${invite.token}` : "");
                   const isCopied = copiedLink === link;
                   return (
                     <div
-                      key={inv.id}
+                      key={invite.id}
                       className="flex items-center justify-between gap-2 rounded bg-white px-3 py-2"
                     >
-                      <span className="truncate text-sm text-gray-700">{inv.email}</span>
-                      <div className="flex items-center gap-2">
+                      <div className="min-w-0">
+                        <span className="block truncate text-sm text-gray-700">{invite.email}</span>
+                        {showTechnicalDetails && invite.lastEmailError && (
+                          <span className="block truncate text-xs text-red-600">
+                            {invite.lastEmailError}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
                         <span
                           className={`text-xs ${
-                            inv.status === "completed" ? "text-green-600" : "text-amber-600"
+                            invite.status === "completed" ? "text-green-600" : "text-amber-600"
                           }`}
                         >
-                          {inv.status}
+                          {invite.status}
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => onCopyLink(link)}
-                          className="flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                        >
-                          {isCopied ? (
-                            <>
-                              <Check className="h-3 w-3" />
-                              Copied
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="h-3 w-3" />
-                              Copy link
-                            </>
-                          )}
-                        </button>
+                        {showTechnicalDetails && (
+                          <>
+                            <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
+                              {invite.emailStatus ?? "pending"}
+                            </span>
+                            {link && (
+                              <button
+                                type="button"
+                                onClick={() => onCopyLink(link)}
+                                className="flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                              >
+                                {isCopied ? (
+                                  <>
+                                    <Check className="h-3 w-3" />
+                                    Copied
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="h-3 w-3" />
+                                    Copy link
+                                  </>
+                                )}
+                              </button>
+                            )}
+                          </>
+                        )}
                       </div>
                     </div>
                   );
@@ -671,5 +641,396 @@ function CampaignCard({
         </div>
       )}
     </div>
+  );
+}
+
+function AnalysisSection({
+  org,
+  campaigns,
+  reports,
+  selectedReport,
+  setSelectedReport,
+  authedFetch,
+  onReportsChanged,
+}: {
+  org: Organization;
+  campaigns: Campaign[];
+  reports: Report[];
+  selectedReport: Report | null;
+  setSelectedReport: (report: Report | null) => void;
+  authedFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  onReportsChanged: () => Promise<void>;
+}) {
+  const [completionRows, setCompletionRows] = useState<
+    { campaign: Campaign; completed: number; total: number }[]
+  >([]);
+  const [loading, setLoading] = useState(true);
+  const [generatingCampaignId, setGeneratingCampaignId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadCompletion() {
+      setLoading(true);
+      const rows = [];
+      for (const campaign of campaigns) {
+        const response = await authedFetch(
+          `/api/org/campaigns/${campaign.id}/invites?orgId=${encodeURIComponent(org.id)}`
+        );
+        if (!response.ok) continue;
+        const data = (await response.json()) as { invites: Invite[] };
+        rows.push({
+          campaign,
+          total: data.invites.length,
+          completed: data.invites.filter((invite) => invite.status === "completed").length,
+        });
+      }
+      if (!cancelled) {
+        setCompletionRows(rows);
+        setLoading(false);
+      }
+    }
+    loadCompletion().catch((loadError) => {
+      console.error(loadError);
+      if (!cancelled) setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [authedFetch, campaigns, org.id]);
+
+  const generateReport = async (campaign: Campaign) => {
+    setError("");
+    setGeneratingCampaignId(campaign.id);
+    try {
+      const response = await authedFetch("/api/org/reports", {
+        method: "POST",
+        body: JSON.stringify({ orgId: org.id, campaignId: campaign.id }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error ?? (await response.text()));
+      }
+      const data = (await response.json()) as { report: Report };
+      await onReportsChanged();
+      setSelectedReport(data.report);
+    } catch (generateError) {
+      setError(generateError instanceof Error ? generateError.message : "Could not generate report.");
+    } finally {
+      setGeneratingCampaignId(null);
+    }
+  };
+
+  if (selectedReport) {
+    return <ReportView report={selectedReport} onBack={() => setSelectedReport(null)} />;
+  }
+
+  return (
+    <div className="space-y-8">
+      <div>
+        <h2 className="text-xl font-semibold text-gray-900">Analysis & Reports</h2>
+        <p className="mt-1 text-gray-600">
+          Generate reports once a campaign reaches {org.thresholdPercent}% completion.
+        </p>
+      </div>
+
+      {error && (
+        <p className="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </p>
+      )}
+
+      {reports.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="font-semibold text-gray-900">Generated reports</h3>
+          {reports.map((report) => (
+            <button
+              key={report.id}
+              type="button"
+              onClick={() => setSelectedReport(report)}
+              className="flex w-full items-center justify-between rounded-xl border border-gray-200 bg-white px-6 py-4 text-left shadow-sm transition-colors hover:border-[#D97706] hover:bg-amber-50/50"
+            >
+              <span className="flex items-center gap-2 font-semibold text-gray-900">
+                <FileText className="h-4 w-4 text-[#D97706]" />
+                {report.campaignName}
+              </span>
+              <span className="text-sm text-gray-500">
+                {report.completionCount}/{report.inviteCount} completed · {report.averageScore}%
+                average
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="space-y-3">
+        <h3 className="font-semibold text-gray-900">Campaign eligibility</h3>
+        {loading ? (
+          <div className="flex justify-center py-12">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#D97706] border-t-transparent" />
+          </div>
+        ) : completionRows.length === 0 ? (
+          <p className="rounded-2xl border border-dashed border-gray-300 bg-white py-12 text-center text-gray-500">
+            No campaigns yet. Create a campaign and send invites first.
+          </p>
+        ) : (
+          completionRows.map(({ campaign, completed, total }) => {
+            const eligible = total > 0 && (completed / total) * 100 >= org.thresholdPercent;
+            return (
+              <div
+                key={campaign.id}
+                className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-6 py-4 shadow-sm"
+              >
+                <div>
+                  <p className="font-semibold text-gray-900">{campaign.name}</p>
+                  <p className="text-sm text-gray-500">
+                    {completed}/{total} completed
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => generateReport(campaign)}
+                  disabled={!eligible || generatingCampaignId === campaign.id}
+                  className="rounded-lg bg-[#D97706] px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
+                >
+                  {generatingCampaignId === campaign.id ? "Generating..." : "Generate report"}
+                </button>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ReportView({ report, onBack }: { report: Report; onBack: () => void }) {
+  const noop = () => {};
+  const radarData = getRadarData(report.scores);
+  const stabilityColor =
+    report.averageScore >= 75 ? "#10B981" : report.averageScore >= 50 ? "#F59E0B" : "#EF4444";
+
+  const downloadCsv = () => {
+    const rows = [
+      ["Metric", "Score"],
+      ["Vision", report.scores.vision],
+      ["Alignment", report.scores.alignment],
+      ["Performance", report.scores.performance],
+      ["Cohesion", report.scores.cohesion],
+      ["Processes", report.scores.processes],
+      ["Scalability", report.scores.scalability],
+      ["Average", report.averageScore],
+      ["Completed", report.completionCount],
+      ["Invited", report.inviteCount],
+      ...report.contextVariables.map((item) => [
+        "Context Variable",
+        item.variableKey,
+        `"${item.question.replace(/"/g, '""')}"`,
+        item.averageScore,
+        item.count,
+      ]),
+      ...report.validationSignals.map((item) => [
+        "Validation Signal",
+        item.variableKey,
+        `"${item.question.replace(/"/g, '""')}"`,
+        item.averageScore,
+        item.count,
+      ]),
+      ...report.qualitativeResponses.map((response) => [
+        "Qualitative",
+        response.scoreKey ?? "",
+        response.variableKey ?? "",
+        `"${response.question.replace(/"/g, '""')}"`,
+        `"${response.answer.replace(/"/g, '""').replace(/\n/g, " ")}"`,
+      ]),
+    ];
+    const csv = rows.map((row) => row.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${report.campaignName.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-report.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <button onClick={onBack} className="text-sm font-medium text-[#D97706] hover:underline">
+          Back to reports
+        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={downloadCsv}
+            className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            <Download className="h-4 w-4" />
+            CSV
+          </button>
+          <button
+            onClick={() => window.print()}
+            className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            <Printer className="h-4 w-4" />
+            Print / PDF
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <h2 className="mb-2 text-xl font-semibold text-gray-900">{report.campaignName} report</h2>
+        <p className="mb-6 text-sm text-gray-500">
+          {report.orgName} · Based on {report.completionCount} completed responses from{" "}
+          {report.inviteCount} invites
+        </p>
+        <ExecutiveHeader
+          averageScore={report.averageScore}
+          stabilityLabel={report.stabilityHeaderLabel}
+          stabilityColor={stabilityColor}
+        />
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
+          <div className="space-y-6 lg:col-span-5">
+            <PillarCard
+              title="1. Vision & Alignment"
+              icon={Target}
+              inputs={[
+                { id: "vision", label: "Vision Clarity", value: report.scores.vision, onChange: noop },
+                {
+                  id: "alignment",
+                  label: "Strategic Alignment",
+                  value: report.scores.alignment,
+                  onChange: noop,
+                },
+              ]}
+            />
+            <PillarCard
+              title="2. Team Performance"
+              icon={Zap}
+              inputs={[
+                {
+                  id: "performance",
+                  label: "Execution Speed",
+                  value: report.scores.performance,
+                  onChange: noop,
+                },
+                { id: "cohesion", label: "Team Cohesion", value: report.scores.cohesion, onChange: noop },
+              ]}
+            />
+            <PillarCard
+              title="3. Systems & Structure"
+              icon={Component}
+              inputs={[
+                {
+                  id: "processes",
+                  label: "Process Efficiency",
+                  value: report.scores.processes,
+                  onChange: noop,
+                },
+                { id: "scalability", label: "Scalability", value: report.scores.scalability, onChange: noop },
+              ]}
+            />
+          </div>
+          <div className="lg:col-span-7">
+            <div className="relative flex h-full min-h-[400px] flex-col overflow-hidden rounded-3xl bg-[#1A1A1A] p-10 text-white shadow-2xl">
+              <div className="relative z-10 mb-8">
+                <h2 className="mb-2 text-3xl font-bold">Health Profile Analysis</h2>
+                <p className="text-sm text-gray-400">
+                  Aggregate organizational health profile. Individual responses are not exposed.
+                </p>
+              </div>
+              <div className="relative z-10 flex flex-1 items-center justify-center">
+                <RadarChart data={radarData} />
+              </div>
+              <StabilityBar
+                value={report.averageScore}
+                label={report.stabilityLabel}
+                barColor={stabilityColor}
+              />
+            </div>
+          </div>
+        </div>
+        {(report.contextVariables.length > 0 || report.validationSignals.length > 0) && (
+          <div className="mt-8 grid gap-6 lg:grid-cols-2">
+            {report.contextVariables.length > 0 && (
+              <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+                <h3 className="mb-2 text-lg font-semibold text-gray-900">
+                  Context variables
+                </h3>
+                <p className="mb-4 text-sm text-gray-500">
+                  These explain the operating environment and do not change the core score.
+                </p>
+                <div className="space-y-3">
+                  {report.contextVariables.map((item) => (
+                    <div key={item.variableKey} className="rounded-xl bg-gray-50 p-4">
+                      <div className="mb-1 flex items-center justify-between gap-3">
+                        <p className="text-sm font-semibold text-gray-900">{item.variableKey}</p>
+                        <span className="text-sm font-bold text-[#D97706]">
+                          {item.averageScore}%
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-500">{item.question}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {report.validationSignals.length > 0 && (
+              <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+                <h3 className="mb-2 text-lg font-semibold text-gray-900">
+                  Validation checks
+                </h3>
+                <p className="mb-4 text-sm text-gray-500">
+                  These help compare responses against other signals in the survey.
+                </p>
+                <div className="space-y-3">
+                  {report.validationSignals.map((item) => (
+                    <div key={item.variableKey} className="rounded-xl bg-gray-50 p-4">
+                      <div className="mb-1 flex items-center justify-between gap-3">
+                        <p className="text-sm font-semibold text-gray-900">{item.variableKey}</p>
+                        <span className="text-sm font-bold text-[#D97706]">
+                          {item.averageScore}%
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-500">{item.question}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        {report.qualitativeResponses.length > 0 && (
+          <div className="mt-8 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+            <h3 className="mb-2 text-lg font-semibold text-gray-900">
+              Qualitative context
+            </h3>
+            <p className="mb-4 text-sm text-gray-500">
+              Free-text responses are shown without employee names or emails.
+            </p>
+            <div className="space-y-4">
+              {report.qualitativeResponses.map((response, index) => (
+                <div key={index} className="rounded-xl bg-gray-50 p-4">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                    {response.scoreKey ? `${response.scoreKey} pillar` : "qualitative"}
+                    {response.variableKey ? ` · ${response.variableKey}` : ""}
+                  </p>
+                  <p className="mb-2 text-sm font-medium text-gray-800">{response.question}</p>
+                  <p className="text-sm leading-relaxed text-gray-700">{response.answer}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function OrgDashboardPage() {
+  return (
+    <Suspense fallback={<LoadingScreen />}>
+      <OrgDashboardContent />
+    </Suspense>
   );
 }

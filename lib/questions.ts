@@ -8,12 +8,24 @@ export interface Question {
   options: { label: string; value: number }[];
 }
 
+export interface ContextQuestion {
+  id: string;
+  question: string;
+  role: "context" | "validation";
+  options: { label: string; value: number }[];
+}
+
+export interface QualitativeQuestion {
+  id: string;
+  question: string;
+}
+
 /** One question per page - flat list */
 export const ASSESSMENT_QUESTIONS: Question[] = [
   {
     id: "vision",
     question:
-      "Our organization has a clear, well-articulated vision that everyone understands and can describe.",
+      "I clearly understand the long-term vision and strategic direction of this organization.",
     options: [
       { label: "Strongly Disagree", value: 1 },
       { label: "Disagree", value: 2 },
@@ -25,7 +37,7 @@ export const ASSESSMENT_QUESTIONS: Question[] = [
   {
     id: "alignment",
     question:
-      "Strategy and priorities cascade clearly from leadership to teams, with alignment across departments.",
+      "Different departments work together seamlessly toward shared business objectives.",
     options: [
       { label: "Strongly Disagree", value: 1 },
       { label: "Disagree", value: 2 },
@@ -37,7 +49,7 @@ export const ASSESSMENT_QUESTIONS: Question[] = [
   {
     id: "performance",
     question:
-      "Teams consistently deliver on commitments and move quickly from decision to execution.",
+      "Decision-making processes within the organization are rapid and highly effective.",
     options: [
       { label: "Strongly Disagree", value: 1 },
       { label: "Disagree", value: 2 },
@@ -49,7 +61,7 @@ export const ASSESSMENT_QUESTIONS: Question[] = [
   {
     id: "cohesion",
     question:
-      "Teams collaborate effectively, trust each other, and resolve conflicts constructively.",
+      "I feel a strong sense of psychological safety when sharing unconventional ideas with my team.",
     options: [
       { label: "Strongly Disagree", value: 1 },
       { label: "Disagree", value: 2 },
@@ -61,7 +73,7 @@ export const ASSESSMENT_QUESTIONS: Question[] = [
   {
     id: "processes",
     question:
-      "Core processes (e.g., planning, hiring, delivery) are documented, consistent, and efficient.",
+      "Our internal systems and software tools make my job easier, not harder.",
     options: [
       { label: "Strongly Disagree", value: 1 },
       { label: "Disagree", value: 2 },
@@ -73,7 +85,7 @@ export const ASSESSMENT_QUESTIONS: Question[] = [
   {
     id: "scalability",
     question:
-      "Our structure and systems can support growth without significant friction or rework.",
+      "We rely on systematic, documented workflows rather than individual heroic efforts to get things done.",
     options: [
       { label: "Strongly Disagree", value: 1 },
       { label: "Disagree", value: 2 },
@@ -81,6 +93,53 @@ export const ASSESSMENT_QUESTIONS: Question[] = [
       { label: "Agree", value: 4 },
       { label: "Strongly Agree", value: 5 },
     ],
+  },
+];
+
+export const CONTEXT_QUESTIONS: ContextQuestion[] = [
+  {
+    id: "infrastructure",
+    role: "context",
+    question:
+      "Power grid instability or internet outages rarely disrupt our operational output.",
+    options: [
+      { label: "Strongly Disagree", value: 1 },
+      { label: "Disagree", value: 2 },
+      { label: "Neutral", value: 3 },
+      { label: "Agree", value: 4 },
+      { label: "Strongly Agree", value: 5 },
+    ],
+  },
+  {
+    id: "decision_consistency",
+    role: "validation",
+    question:
+      "The way decisions are made in my team matches the way leadership describes our decision-making process.",
+    options: [
+      { label: "Strongly Disagree", value: 1 },
+      { label: "Disagree", value: 2 },
+      { label: "Neutral", value: 3 },
+      { label: "Agree", value: 4 },
+      { label: "Strongly Agree", value: 5 },
+    ],
+  },
+];
+
+export const QUALITATIVE_QUESTIONS: QualitativeQuestion[] = [
+  {
+    id: "qual1",
+    question:
+      "What is the single biggest operational bottleneck preventing you from doing your best work right now?",
+  },
+  {
+    id: "qual2",
+    question:
+      "If you could change one systemic or structural process tomorrow, what would it be and why?",
+  },
+  {
+    id: "qual3",
+    question:
+      "What external market or environmental challenge is currently impacting your team's output the most?",
   },
 ];
 

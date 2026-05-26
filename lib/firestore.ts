@@ -34,6 +34,9 @@ export type QuestionOption = {
 export type FirestoreQuestion = {
   id: string;
   text: string;
+  type: "quantitative" | "qualitative";
+  role: "score" | "context" | "validation";
+  variableKey?: string;
   scoreKey: string;
   order: number;
   options: QuestionOption[];
@@ -79,6 +82,14 @@ function snapshotToQuestion(
   return {
     id: d.id,
     text: data.text ?? "",
+    type: data.type === "qualitative" ? "qualitative" : "quantitative",
+    role:
+      data.role === "context" || data.role === "validation"
+        ? data.role
+        : data.type === "qualitative"
+          ? "context"
+          : "score",
+    variableKey: data.variableKey,
     scoreKey: data.scoreKey ?? "vision",
     order: data.order ?? 0,
     options: Array.isArray(data.options)

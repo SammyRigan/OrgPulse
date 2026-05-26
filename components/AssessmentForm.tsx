@@ -3,31 +3,78 @@
 import { useState, useEffect } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { getQuestions } from "@/lib/firestore";
-import { ASSESSMENT_QUESTIONS, answerToScore, answersToScores } from "@/lib/questions";
+import {
+  ASSESSMENT_QUESTIONS,
+  CONTEXT_QUESTIONS,
+  QUALITATIVE_QUESTIONS,
+  answerToScore,
+  answersToScores,
+} from "@/lib/questions";
 import type { Scores } from "@/lib/utils";
 import type { ScoreKey } from "@/lib/questions";
 
+const FALLBACK_QUALITATIVE_VARIABLE_KEYS = [
+  "operational_bottleneck",
+  "process_change",
+  "external_challenge",
+];
+
+const FALLBACK_QUALITATIVE_PILLARS = ["processes", "processes", "scalability"];
+
 type CmsQuestion = {
   id: string;
+  type: "quantitative" | "qualitative";
+  role: "score" | "context" | "validation";
+  variableKey: string;
   question: string;
   scoreKey: string;
   options: { label: string; points: number }[];
 };
 
-export type AnswerSummary = { question: string; answer: string }[];
+export type AnswerSummary = {
+  type: "quantitative" | "qualitative";
+  question: string;
+  answer: string;
+}[];
+
+export type QualitativeResponses = Record<
+  string,
+  { question: string; answer: string; scoreKey: string; variableKey: string }
+>;
+export type DiagnosticResponses = Record<
+  string,
+  {
+    question: string;
+    role: "context" | "validation";
+    variableKey: string;
+    score: number;
+    answer: string;
+  }
+>;
 
 interface AssessmentFormProps {
-  onSubmit: (scores: Scores, summary?: AnswerSummary) => void;
+  onSubmit: (
+    scores: Scores,
+    summary?: AnswerSummary,
+    qualitativeResponses?: QualitativeResponses,
+    diagnosticResponses?: DiagnosticResponses
+  ) => void;
 }
 
 function toCmsQuestion(q: {
   id: string;
   text: string;
+  type?: "quantitative" | "qualitative";
+  role?: "score" | "context" | "validation";
+  variableKey?: string;
   scoreKey: string;
   options: { label: string; points: number }[];
 }): CmsQuestion {
   return {
     id: q.id,
+    type: q.type ?? (q.options.length > 0 ? "quantitative" : "qualitative"),
+    role: q.role ?? (q.type === "qualitative" ? "context" : "score"),
+    variableKey: q.variableKey ?? q.scoreKey ?? q.id,
     question: q.text,
     scoreKey: q.scoreKey,
     options: q.options,
@@ -39,6 +86,7 @@ export default function AssessmentForm({ onSubmit }: AssessmentFormProps) {
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(0);
   const [answers, setAnswers] = useState<Partial<Record<string, number>>>({});
+  const [qualitativeAnswers, setQualitativeAnswers] = useState<Record<string, string>>({});
 
   useEffect(() => {
     getQuestions()
@@ -47,29 +95,90 @@ export default function AssessmentForm({ onSubmit }: AssessmentFormProps) {
           setQuestions(data.map(toCmsQuestion));
         } else {
           setQuestions(
-            ASSESSMENT_QUESTIONS.map((q) => ({
+            [
+              ...ASSESSMENT_QUESTIONS.map((q) => ({
+                id: q.id,
+                type: "quantitative" as const,
+                role: "score" as const,
+                variableKey: q.id,
+                question: q.question,
+                scoreKey: q.id,
+                options: q.options.map((o) => ({
+                  label: o.label,
+                  points: answerToScore(o.value),
+                })),
+              })),
+              ...CONTEXT_QUESTIONS.map((q) => ({
+                id: q.id,
+                type: "quantitative" as const,
+                role: q.role,
+                variableKey: q.id,
+                question: q.question,
+                scoreKey: "vision",
+                options: q.options.map((o) => ({
+                  label: o.label,
+                  points: answerToScore(o.value),
+                })),
+              })),
+              ...QUALITATIVE_QUESTIONS.map((q) => ({
+                id: q.id,
+                type: "qualitative" as const,
+                role: "context" as const,
+                variableKey:
+                  FALLBACK_QUALITATIVE_VARIABLE_KEYS[
+                    QUALITATIVE_QUESTIONS.indexOf(q)
+                  ] ?? "additional_context",
+                question: q.question,
+                scoreKey:
+                  FALLBACK_QUALITATIVE_PILLARS[QUALITATIVE_QUESTIONS.indexOf(q)] ??
+                  "vision",
+                options: [],
+              })),
+            ]
+          );
+        }
+      })
+      .catch(() => {
+        setQuestions(
+          [
+            ...ASSESSMENT_QUESTIONS.map((q) => ({
               id: q.id,
+              type: "quantitative" as const,
+              role: "score" as const,
+              variableKey: q.id,
               question: q.question,
               scoreKey: q.id,
               options: q.options.map((o) => ({
                 label: o.label,
                 points: answerToScore(o.value),
               })),
-            }))
-          );
-        }
-      })
-      .catch(() => {
-        setQuestions(
-          ASSESSMENT_QUESTIONS.map((q) => ({
-            id: q.id,
-            question: q.question,
-            scoreKey: q.id,
-            options: q.options.map((o) => ({
-              label: o.label,
-              points: answerToScore(o.value),
             })),
-          }))
+            ...CONTEXT_QUESTIONS.map((q) => ({
+              id: q.id,
+              type: "quantitative" as const,
+              role: q.role,
+              variableKey: q.id,
+              question: q.question,
+              scoreKey: "vision",
+              options: q.options.map((o) => ({
+                label: o.label,
+                points: answerToScore(o.value),
+              })),
+            })),
+            ...QUALITATIVE_QUESTIONS.map((q) => ({
+              id: q.id,
+              type: "qualitative" as const,
+              role: "context" as const,
+              variableKey:
+                FALLBACK_QUALITATIVE_VARIABLE_KEYS[QUALITATIVE_QUESTIONS.indexOf(q)] ??
+                "additional_context",
+              question: q.question,
+              scoreKey:
+                FALLBACK_QUALITATIVE_PILLARS[QUALITATIVE_QUESTIONS.indexOf(q)] ??
+                "vision",
+              options: [],
+            })),
+          ]
         );
       })
       .finally(() => setLoading(false));
@@ -90,10 +199,11 @@ export default function AssessmentForm({ onSubmit }: AssessmentFormProps) {
   const isFirstPage = currentPage === 0;
   const isLastPage = currentPage === totalPages - 1;
 
-  const answered = answers[question.scoreKey] != null;
+  const answered =
+    question.type === "qualitative" || answers[question.id] != null;
 
   const handleAnswer = (points: number) => {
-    setAnswers((prev) => ({ ...prev, [question.scoreKey]: points }));
+    setAnswers((prev) => ({ ...prev, [question.id]: points }));
   };
 
   const handleNext = () => {
@@ -106,17 +216,61 @@ export default function AssessmentForm({ onSubmit }: AssessmentFormProps) {
         processes: 50,
         scalability: 50,
       };
-      Object.entries(answers).forEach(([key, val]) => {
-        if (val != null && key in scoreValues) {
-          scoreValues[key as ScoreKey] = val;
-        }
-      });
+      questions
+        .filter((q) => q.type === "quantitative" && q.role === "score")
+        .forEach((q) => {
+          const val = answers[q.id];
+          if (val != null && q.scoreKey in scoreValues) {
+            scoreValues[q.scoreKey as ScoreKey] = val;
+          }
+        });
       const summary: AnswerSummary = questions.map((q) => {
-        const points = answers[q.scoreKey];
+        if (q.type === "qualitative") {
+          return {
+            type: "qualitative",
+            question: q.question,
+            answer: qualitativeAnswers[q.id]?.trim() || "No qualitative context provided.",
+          };
+        }
+        const points = answers[q.id];
         const opt = q.options.find((o) => o.points === points);
-        return { question: q.question, answer: opt?.label ?? "—" };
+        return { type: "quantitative", question: q.question, answer: opt?.label ?? "-" };
       });
-      onSubmit(answersToScores(scoreValues), summary);
+      const qualitativeResponses: QualitativeResponses = {};
+      questions
+        .filter((q) => q.type === "qualitative")
+        .forEach((q) => {
+          const answer = qualitativeAnswers[q.id]?.trim();
+          if (answer) {
+            qualitativeResponses[q.id] = {
+              question: q.question,
+              answer,
+              scoreKey: q.scoreKey,
+              variableKey: q.variableKey,
+            };
+          }
+        });
+      const diagnosticResponses: DiagnosticResponses = {};
+      questions
+        .filter(
+          (q) =>
+            q.type === "quantitative" &&
+            (q.role === "context" || q.role === "validation")
+        )
+        .forEach((q) => {
+          const score = answers[q.id];
+          const opt = q.options.find((o) => o.points === score);
+          if (score != null) {
+            diagnosticResponses[q.id] = {
+              question: q.question,
+              role: q.role as "context" | "validation",
+              variableKey: q.variableKey,
+              score,
+              answer: opt?.label ?? String(score),
+            };
+          }
+        });
+      onSubmit(answersToScores(scoreValues), summary, qualitativeResponses, diagnosticResponses);
     } else {
       setCurrentPage((prev) => Math.min(prev + 1, totalPages - 1));
     }
@@ -148,30 +302,50 @@ export default function AssessmentForm({ onSubmit }: AssessmentFormProps) {
           <legend className="mb-6 text-lg font-medium text-gray-800">
             {question.question}
           </legend>
-          <div className="flex flex-col gap-2">
-            {question.options.map((opt) => (
-              <label
-                key={opt.label}
-                className={`flex cursor-pointer items-center gap-3 rounded-xl border-2 px-4 py-3 transition-colors ${
-                  answers[question.scoreKey] === opt.points
-                    ? "border-[#D97706] bg-amber-50"
-                    : "border-gray-200 bg-gray-50/50 hover:border-gray-300"
-                }`}
-              >
-                <input
-                  type="radio"
-                  name={question.scoreKey}
-                  value={opt.points}
-                  checked={answers[question.scoreKey] === opt.points}
-                  onChange={() => handleAnswer(opt.points)}
-                  className="h-4 w-4 border-gray-300 text-[#D97706] focus:ring-[#D97706]"
-                />
-                <span className="text-sm font-medium text-gray-700">
-                  {opt.label}
-                </span>
-              </label>
-            ))}
-          </div>
+          {question.type === "quantitative" ? (
+            <div className="flex flex-col gap-2">
+              {question.options.map((opt) => (
+                <label
+                  key={opt.label}
+                  className={`flex cursor-pointer items-center gap-3 rounded-xl border-2 px-4 py-3 transition-colors ${
+                    answers[question.id] === opt.points
+                      ? "border-[#D97706] bg-amber-50"
+                      : "border-gray-200 bg-gray-50/50 hover:border-gray-300"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name={question.id}
+                    value={opt.points}
+                    checked={answers[question.id] === opt.points}
+                    onChange={() => handleAnswer(opt.points)}
+                    className="h-4 w-4 border-gray-300 text-[#D97706] focus:ring-[#D97706]"
+                  />
+                  <span className="text-sm font-medium text-gray-700">
+                    {opt.label}
+                  </span>
+                </label>
+              ))}
+            </div>
+          ) : (
+            <div>
+              <p className="mb-3 text-sm text-gray-500">
+                Optional: share specific examples or context.
+              </p>
+              <textarea
+                value={qualitativeAnswers[question.id] ?? ""}
+                onChange={(e) =>
+                  setQualitativeAnswers((prev) => ({
+                    ...prev,
+                    [question.id]: e.target.value,
+                  }))
+                }
+                placeholder="Type your insights here..."
+                rows={6}
+                className="w-full resize-none rounded-xl border border-gray-200 p-4 text-sm text-gray-700 outline-none transition-all focus:border-[#D97706] focus:ring-2 focus:ring-[#D97706]"
+              />
+            </div>
+          )}
         </fieldset>
 
         {/* Navigation */}

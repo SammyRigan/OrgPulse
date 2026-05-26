@@ -4,12 +4,25 @@ import { Suspense, useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { CheckCircle2 } from "lucide-react";
 import AssessmentForm from "@/components/AssessmentForm";
-import type { AnswerSummary } from "@/components/AssessmentForm";
-import {
-  getInviteByTokenForAssessment,
-  completeInvite,
-} from "@/lib/firestore";
+import type {
+  AnswerSummary,
+  DiagnosticResponses,
+  QualitativeResponses,
+} from "@/components/AssessmentForm";
 import type { Scores } from "@/lib/utils";
+
+async function validateInvite(token: string, passcode?: string) {
+  const response = await fetch("/api/assess/validate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, passcode }),
+  });
+  if (!response.ok) return null;
+  return response.json() as Promise<{
+    status: "ready" | "passcode_required" | "invalid_passcode";
+    orgName: string;
+  }>;
+}
 
 function AssessContent() {
   const searchParams = useSearchParams();
@@ -18,9 +31,7 @@ function AssessContent() {
   const [status, setStatus] = useState<
     "loading" | "invalid" | "passcode" | "ready" | "submitting" | "done"
   >("loading");
-  const [inviteId, setInviteId] = useState<string | null>(null);
   const [orgName, setOrgName] = useState("");
-  const [expectedPasscode, setExpectedPasscode] = useState<string | null>(null);
   const [passcodeInput, setPasscodeInput] = useState("");
   const [passcodeError, setPasscodeError] = useState("");
   const [answerSummary, setAnswerSummary] = useState<AnswerSummary | null>(null);
@@ -30,16 +41,14 @@ function AssessContent() {
       setStatus("invalid");
       return;
     }
-    getInviteByTokenForAssessment(token)
+    validateInvite(token)
       .then((data) => {
         if (!data) {
           setStatus("invalid");
           return;
         }
-        setInviteId(data.invite.id);
-        setOrgName(data.org.name);
-        if (data.invite.passcode) {
-          setExpectedPasscode(data.invite.passcode);
+        setOrgName(data.orgName);
+        if (data.status === "passcode_required") {
           setStatus("passcode");
         } else {
           setStatus("ready");
@@ -50,20 +59,41 @@ function AssessContent() {
 
   const handlePasscodeSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!expectedPasscode) return;
-    if (passcodeInput.trim() === expectedPasscode) {
-      setPasscodeError("");
-      setStatus("ready");
-    } else {
-      setPasscodeError("Incorrect passcode. Please try again.");
-    }
+    if (!token) return;
+    validateInvite(token, passcodeInput.trim())
+      .then((data) => {
+        if (data?.status === "ready") {
+          setPasscodeError("");
+          setOrgName(data.orgName);
+          setStatus("ready");
+          return;
+        }
+        setPasscodeError("Incorrect passcode. Please try again.");
+      })
+      .catch(() => setPasscodeError("Incorrect passcode. Please try again."));
   };
 
-  const handleSubmit = async (formScores: Scores, summary?: AnswerSummary) => {
-    if (!inviteId) return;
+  const handleSubmit = async (
+    formScores: Scores,
+    summary?: AnswerSummary,
+    qualitativeResponses?: QualitativeResponses,
+    diagnosticResponses?: DiagnosticResponses
+  ) => {
+    if (!token) return;
     setStatus("submitting");
     try {
-      await completeInvite(inviteId, formScores);
+      const response = await fetch("/api/assess/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token,
+          passcode: passcodeInput.trim() || undefined,
+          responses: formScores,
+          qualitativeResponses,
+          diagnosticResponses,
+        }),
+      });
+      if (!response.ok) throw new Error(await response.text());
       setAnswerSummary(summary ?? null);
       setStatus("done");
     } catch {
@@ -79,7 +109,7 @@ function AssessContent() {
     );
   }
 
-  if (status === "passcode" && expectedPasscode) {
+  if (status === "passcode") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50 p-4">
         <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-8 shadow-sm">
