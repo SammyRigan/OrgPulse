@@ -16,6 +16,11 @@ const SCORE_KEYS = [
 export type ServerOrganization = {
   id: string;
   name: string;
+  description?: string;
+  size?: string;
+  annualTurnover?: string;
+  industry?: string;
+  industryOther?: string;
   thresholdPercent: number;
   useDefaultQuestions: boolean;
   adminUid?: string;
@@ -103,6 +108,11 @@ export function organizationFromDoc(id: string, data: DocumentData): ServerOrgan
   return {
     id,
     name: data.name ?? "",
+    description: typeof data.description === "string" ? data.description : undefined,
+    size: typeof data.size === "string" ? data.size : undefined,
+    annualTurnover: typeof data.annualTurnover === "string" ? data.annualTurnover : undefined,
+    industry: typeof data.industry === "string" ? data.industry : undefined,
+    industryOther: typeof data.industryOther === "string" ? data.industryOther : undefined,
     thresholdPercent: data.thresholdPercent ?? 80,
     useDefaultQuestions: data.useDefaultQuestions ?? true,
     adminUid: data.adminUid,

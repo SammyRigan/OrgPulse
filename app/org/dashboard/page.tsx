@@ -34,6 +34,11 @@ const RadarChart = dynamic(() => import("@/components/RadarChart"), { ssr: false
 type Organization = {
   id: string;
   name: string;
+  description?: string;
+  size?: string;
+  annualTurnover?: string;
+  industry?: string;
+  industryOther?: string;
   thresholdPercent: number;
   useDefaultQuestions: boolean;
 };
@@ -78,6 +83,44 @@ type Report = {
 
 type Section = "profile" | "campaigns" | "analysis";
 
+const INDUSTRY_OPTIONS = [
+  "Agriculture",
+  "Construction",
+  "Education",
+  "Energy",
+  "Finance",
+  "Government / Public sector",
+  "Healthcare",
+  "Hospitality",
+  "Manufacturing",
+  "Non-profit",
+  "Retail",
+  "Technology",
+  "Telecommunications",
+  "Transportation & Logistics",
+  "Other",
+] as const;
+
+const ORG_SIZE_OPTIONS = [
+  "1–10",
+  "11–50",
+  "51–200",
+  "201–500",
+  "501–1,000",
+  "1,001–5,000",
+  "5,000+",
+] as const;
+
+const ANNUAL_TURNOVER_OPTIONS = [
+  "Prefer not to say",
+  "< $100k",
+  "$100k – $500k",
+  "$500k – $1M",
+  "$1M – $5M",
+  "$5M – $20M",
+  "$20M+",
+] as const;
+
 function LoadingScreen() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50">
@@ -100,6 +143,11 @@ function OrgDashboardContent() {
   const [section, setSection] = useState<Section>("profile");
   const [profileName, setProfileName] = useState("");
   const [profileThreshold, setProfileThreshold] = useState(80);
+  const [profileDescription, setProfileDescription] = useState("");
+  const [profileSize, setProfileSize] = useState("");
+  const [profileAnnualTurnover, setProfileAnnualTurnover] = useState("");
+  const [profileIndustry, setProfileIndustry] = useState("");
+  const [profileIndustryOther, setProfileIndustryOther] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
   const [newCampaignName, setNewCampaignName] = useState("");
   const [newCampaignPasscode, setNewCampaignPasscode] = useState("");
@@ -147,6 +195,11 @@ function OrgDashboardContent() {
     setActorEmail(data.actorEmail);
     setProfileName(data.org.name);
     setProfileThreshold(data.org.thresholdPercent);
+    setProfileDescription(data.org.description ?? "");
+    setProfileSize(data.org.size ?? "");
+    setProfileAnnualTurnover(data.org.annualTurnover ?? "");
+    setProfileIndustry(data.org.industry ?? "");
+    setProfileIndustryOther(data.org.industryOther ?? "");
   }, [authedFetch, requestedOrgId, user]);
 
   useEffect(() => {
@@ -188,6 +241,11 @@ function OrgDashboardContent() {
         body: JSON.stringify({
           orgId: org.id,
           name: profileName.trim(),
+          description: profileDescription.trim(),
+          size: profileSize,
+          annualTurnover: profileAnnualTurnover,
+          industry: profileIndustry,
+          industryOther: profileIndustry === "Other" ? profileIndustryOther.trim() : "",
           thresholdPercent: profileThreshold,
         }),
       });
@@ -355,6 +413,84 @@ function OrgDashboardContent() {
                   className="w-full rounded-lg border border-gray-300 px-4 py-2.5 focus:border-[#D97706] focus:outline-none focus:ring-1 focus:ring-[#D97706]"
                 />
               </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Description
+                </label>
+                <textarea
+                  value={profileDescription}
+                  onChange={(event) => setProfileDescription(event.target.value)}
+                  rows={3}
+                  placeholder="What does your organization do?"
+                  className="w-full rounded-lg border border-gray-300 px-4 py-2.5 focus:border-[#D97706] focus:outline-none focus:ring-1 focus:ring-[#D97706]"
+                />
+              </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">
+                    Organization size
+                  </label>
+                  <select
+                    value={profileSize}
+                    onChange={(event) => setProfileSize(event.target.value)}
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 focus:border-[#D97706] focus:outline-none focus:ring-1 focus:ring-[#D97706]"
+                  >
+                    <option value="">Select…</option>
+                    {ORG_SIZE_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">
+                    Annual turnover
+                  </label>
+                  <select
+                    value={profileAnnualTurnover}
+                    onChange={(event) => setProfileAnnualTurnover(event.target.value)}
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 focus:border-[#D97706] focus:outline-none focus:ring-1 focus:ring-[#D97706]"
+                  >
+                    <option value="">Select…</option>
+                    {ANNUAL_TURNOVER_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Industry
+                </label>
+                <select
+                  value={profileIndustry}
+                  onChange={(event) => setProfileIndustry(event.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-4 py-2.5 focus:border-[#D97706] focus:outline-none focus:ring-1 focus:ring-[#D97706]"
+                >
+                  <option value="">Select…</option>
+                  {INDUSTRY_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {profileIndustry === "Other" && (
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">
+                    Industry (Other)
+                  </label>
+                  <input
+                    type="text"
+                    value={profileIndustryOther}
+                    onChange={(event) => setProfileIndustryOther(event.target.value)}
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 focus:border-[#D97706] focus:outline-none focus:ring-1 focus:ring-[#D97706]"
+                  />
+                </div>
+              )}
               <div>
                 <label className="mb-1 block text-sm font-medium text-gray-700">
                   Completion threshold (%)

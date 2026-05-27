@@ -49,8 +49,19 @@ export async function PATCH(request: Request) {
     const name = String(body.name ?? "").trim();
     if (!name) return new Response("Organization name is required", { status: 400 });
 
+    const description = String(body.description ?? "").trim();
+    const size = String(body.size ?? "").trim();
+    const annualTurnover = String(body.annualTurnover ?? "").trim();
+    const industry = String(body.industry ?? "").trim();
+    const industryOther = String(body.industryOther ?? "").trim();
+
     await adminDb.collection("organizations").doc(orgId).update({
       name,
+      description: description || FieldValue.delete(),
+      size: size || FieldValue.delete(),
+      annualTurnover: annualTurnover || FieldValue.delete(),
+      industry: industry || FieldValue.delete(),
+      industryOther: industry === "Other" ? (industryOther || FieldValue.delete()) : FieldValue.delete(),
       thresholdPercent: Number(body.thresholdPercent) || 80,
       updatedAt: FieldValue.serverTimestamp(),
     });
