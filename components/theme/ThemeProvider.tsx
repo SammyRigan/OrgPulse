@@ -3,6 +3,10 @@
  import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
  
  type ThemePreference = "system" | "light" | "dark";
+type LegacyMediaQueryList = MediaQueryList & {
+  addListener?: (listener: (event: MediaQueryListEvent) => void) => void;
+  removeListener?: (listener: (event: MediaQueryListEvent) => void) => void;
+};
  
  type ThemeContextValue = {
    preference: ThemePreference;
@@ -46,14 +50,15 @@
    useEffect(() => {
      if (!window.matchMedia) return;
      const media = window.matchMedia("(prefers-color-scheme: dark)");
-     const handler = () => setSystemDark(media.matches);
- 
-     if ("addEventListener" in media) media.addEventListener("change", handler);
-     else media.addListener(handler);
+    const legacyMedia = media as LegacyMediaQueryList;
+    const handler = (event: MediaQueryListEvent) => setSystemDark(event.matches);
+
+    if (typeof media.addEventListener === "function") media.addEventListener("change", handler);
+    else legacyMedia.addListener?.(handler);
  
      return () => {
-       if ("removeEventListener" in media) media.removeEventListener("change", handler);
-       else media.removeListener(handler);
+      if (typeof media.removeEventListener === "function") media.removeEventListener("change", handler);
+      else legacyMedia.removeListener?.(handler);
      };
    }, []);
  
