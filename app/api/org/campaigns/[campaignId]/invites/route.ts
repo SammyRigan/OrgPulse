@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { resolveAccessibleOrgId, toErrorResponse } from "@/lib/serverAuth";
 import { getCampaignInvites, getCampaignOrThrow } from "@/lib/serverOrgData";
+import { getServerBaseUrl } from "@/lib/serverBaseUrl";
 
 export async function GET(
   request: Request,
@@ -18,9 +19,7 @@ export async function GET(
 
     const invites = await getCampaignInvites(campaignId);
     const canSeeTechnicalDetails = auth.superAdmin && impersonating;
-    const baseUrl =
-      process.env.NEXT_PUBLIC_APP_URL ??
-      `${url.protocol}//${request.headers.get("host") ?? "localhost:3000"}`;
+    const baseUrl = getServerBaseUrl(request);
 
     return NextResponse.json({
       invites: invites.map((invite) =>
@@ -33,6 +32,8 @@ export async function GET(
               id: invite.id,
               email: invite.email,
               status: invite.status,
+              token: invite.token,
+              link: `${baseUrl}/assess?token=${invite.token}`,
             }
       ),
     });

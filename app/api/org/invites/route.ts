@@ -2,6 +2,7 @@ import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { NextResponse } from "next/server";
 import { sendInviteEmail } from "@/lib/email";
 import { adminDb } from "@/lib/firebaseAdmin";
+import { getServerBaseUrl } from "@/lib/serverBaseUrl";
 import { resolveAccessibleOrgId, toErrorResponse } from "@/lib/serverAuth";
 import {
   generateToken,
@@ -15,13 +16,6 @@ import {
 async function getInviteExpiryDays(): Promise<number> {
   const snap = await adminDb.collection("adminSettings").doc("main").get();
   return snap.get("inviteExpiryDays") ?? 10;
-}
-
-function getBaseUrl(request: Request): string {
-  return (
-    process.env.NEXT_PUBLIC_APP_URL ??
-    `${new URL(request.url).protocol}//${request.headers.get("host") ?? "localhost:3000"}`
-  );
 }
 
 export async function POST(request: Request) {
@@ -44,7 +38,7 @@ export async function POST(request: Request) {
     const expiresAt = Timestamp.fromDate(
       new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000)
     );
-    const baseUrl = getBaseUrl(request);
+    const baseUrl = getServerBaseUrl(request);
     const invites = [];
 
     for (const email of emails) {
