@@ -742,30 +742,28 @@ function CampaignCard({
                           {invite.status}
                         </span>
                         {showTechnicalDetails && (
-                          <>
-                            <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
-                              {invite.emailStatus ?? "pending"}
-                            </span>
-                            {link && (
-                              <button
-                                type="button"
-                                onClick={() => onCopyLink(link)}
-                                className="flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                              >
-                                {isCopied ? (
-                                  <>
-                                    <Check className="h-3 w-3" />
-                                    Copied
-                                  </>
-                                ) : (
-                                  <>
-                                    <Copy className="h-3 w-3" />
-                                    Copy link
-                                  </>
-                                )}
-                              </button>
+                          <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
+                            {invite.emailStatus ?? "pending"}
+                          </span>
+                        )}
+                        {link && (
+                          <button
+                            type="button"
+                            onClick={() => onCopyLink(link)}
+                            className="flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                          >
+                            {isCopied ? (
+                              <>
+                                <Check className="h-3 w-3" />
+                                Copied
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="h-3 w-3" />
+                                Copy link
+                              </>
                             )}
-                          </>
+                          </button>
                         )}
                       </div>
                     </div>
