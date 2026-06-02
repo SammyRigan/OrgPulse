@@ -85,7 +85,11 @@ export default function AnalysisSection({
       await onReportsChanged();
       setSelectedReport(data.report);
     } catch (generateError) {
-      setError(generateError instanceof Error ? generateError.message : "Could not generate report.");
+      setError(
+        generateError instanceof Error
+          ? generateError.message
+          : "Could not generate intelligence report."
+      );
     } finally {
       setGeneratingCampaignId(null);
     }
@@ -98,9 +102,9 @@ export default function AnalysisSection({
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="text-xl font-semibold text-foreground">Analysis & Reports</h2>
+        <h2 className="text-xl font-semibold text-foreground">Analysis & Intelligence Reports</h2>
         <p className="mt-1 text-(--text-subtle)">
-          Generate reports once a campaign reaches {org.thresholdPercent}% completion.
+          Generate intelligence reports once a campaign reaches {org.thresholdPercent}% completion.
         </p>
       </div>
 
@@ -108,7 +112,7 @@ export default function AnalysisSection({
 
       {reports.length > 0 && (
         <div className="space-y-3">
-          <h3 className="text-sm font-semibold text-(--text-muted)">Generated reports</h3>
+          <h3 className="text-sm font-semibold text-(--text-muted)">Generated intelligence reports</h3>
           <div className="space-y-2">
             {reports.map((report) => (
               <button
@@ -170,7 +174,7 @@ export default function AnalysisSection({
                     isLoading={generatingCampaignId === campaign.id}
                     size="sm"
                   >
-                    Generate report
+                    Generate intelligence report
                   </Button>
                 </Card>
               );

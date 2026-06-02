@@ -1,7 +1,6 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
-import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signOut } from "firebase/auth";
 import {
@@ -9,27 +8,21 @@ import {
   Building2,
   Check,
   ChevronDown,
-  Component,
   Copy,
-  Download,
+  Edit2,
   FileText,
   LogOut,
   Megaphone,
   Plus,
-  Printer,
   Settings,
   ShieldAlert,
-  Target,
-  Zap,
+  Trash2,
+  X,
 } from "lucide-react";
-import ExecutiveHeader from "@/components/ExecutiveHeader";
-import PillarCard from "@/components/PillarCard";
-import StabilityBar from "@/components/StabilityBar";
+import ReportView from "@/components/org-dashboard/ReportView";
 import { auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/useAuth";
-import { getRadarData, type Scores } from "@/lib/utils";
-
-const RadarChart = dynamic(() => import("@/components/RadarChart"), { ssr: false });
+import { type Scores } from "@/lib/utils";
 
 type Organization = {
   id: string;
@@ -309,6 +302,12 @@ function OrgDashboardContent() {
     setTimeout(() => setCopiedLink(null), 2000);
   };
 
+  const handleReportGenerated = async (report: Report) => {
+    await loadContext();
+    setSelectedReport(report);
+    setSection("analysis");
+  };
+
   if (orgLoadError) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50 p-4">
@@ -388,7 +387,7 @@ function OrgDashboardContent() {
             </NavButton>
             <NavButton active={section === "analysis"} onClick={() => setSection("analysis")}>
               <BarChart3 className="h-4 w-4" />
-              Analysis & Reports
+              Intelligence Reports
             </NavButton>
           </div>
         </div>
@@ -569,6 +568,9 @@ function OrgDashboardContent() {
                   copiedLink={copiedLink}
                   onCopyLink={copyLink}
                   showTechnicalDetails={impersonating}
+                  thresholdPercent={org.thresholdPercent}
+                  hasReport={reports.some((report) => report.campaignId === campaign.id)}
+                  onReportGenerated={handleReportGenerated}
                 />
               ))}
               {campaigns.length === 0 && (
@@ -633,6 +635,9 @@ function CampaignCard({
   copiedLink,
   onCopyLink,
   showTechnicalDetails,
+  thresholdPercent,
+  hasReport,
+  onReportGenerated,
 }: {
   campaign: Campaign;
   orgId: string;
@@ -647,8 +652,17 @@ function CampaignCard({
   copiedLink: string | null;
   onCopyLink: (link: string) => void;
   showTechnicalDetails: boolean;
+  thresholdPercent: number;
+  hasReport?: boolean;
+  onReportGenerated?: (report: Report) => void;
 }) {
   const [invites, setInvites] = useState<Invite[]>([]);
+  const [invitesError, setInvitesError] = useState("");
+  const [editingInviteId, setEditingInviteId] = useState<string | null>(null);
+  const [editEmail, setEditEmail] = useState("");
+  const [savingInviteId, setSavingInviteId] = useState<string | null>(null);
+  const [deletingInviteId, setDeletingInviteId] = useState<string | null>(null);
+  const [generatingReport, setGeneratingReport] = useState(false);
 
   useEffect(() => {
     if (!expanded) return;
@@ -657,13 +671,100 @@ function CampaignCard({
         if (!response.ok) throw new Error(await response.text());
         return response.json() as Promise<{ invites: Invite[] }>;
       })
-      .then((data) => setInvites(data.invites))
-      .catch((error) => console.error(error));
+      .then((data) => {
+        setInvitesError("");
+        setInvites(data.invites);
+      })
+      .catch((error) => {
+        console.error(error);
+        setInvitesError("Could not load invitees. Please try again.");
+      });
   }, [authedFetch, campaign.id, expanded, invitesRefreshKey, orgId]);
+
+  const handleStartEditInvite = (invite: Invite) => {
+    setInvitesError("");
+    setEditingInviteId(invite.id);
+    setEditEmail(invite.email);
+  };
+
+  const handleCancelEditInvite = () => {
+    setEditingInviteId(null);
+    setEditEmail("");
+  };
+
+  const handleSaveEditInvite = async (inviteId: string) => {
+    const trimmed = editEmail.trim().toLowerCase();
+    if (!trimmed) return;
+
+    setSavingInviteId(inviteId);
+    try {
+      const response = await authedFetch(`/api/org/invites/${inviteId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ orgId, email: trimmed }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const data = (await response.json()) as { invite: Invite };
+      setInvites((current) =>
+        current.map((invite) => (invite.id === inviteId ? { ...invite, ...data.invite } : invite))
+      );
+      setEditingInviteId(null);
+      setEditEmail("");
+    } catch (error) {
+      console.error(error);
+      setInvitesError("Could not update invite email. Please try again.");
+    } finally {
+      setSavingInviteId(null);
+    }
+  };
+
+  const handleDeleteInvite = async (invite: Invite) => {
+    if (!confirm(`Remove invite for ${invite.email}?`)) return;
+
+    setDeletingInviteId(invite.id);
+    try {
+      const response = await authedFetch(
+        `/api/org/invites/${invite.id}?orgId=${encodeURIComponent(orgId)}`,
+        { method: "DELETE" }
+      );
+      if (!response.ok) throw new Error(await response.text());
+      setInvites((current) => current.filter((entry) => entry.id !== invite.id));
+      if (editingInviteId === invite.id) handleCancelEditInvite();
+    } catch (error) {
+      console.error(error);
+      setInvitesError("Could not delete invite. Please try again.");
+    } finally {
+      setDeletingInviteId(null);
+    }
+  };
 
   const completed = invites.filter((invite) => invite.status === "completed").length;
   const total = invites.length;
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+  const reportEligible = total > 0 && pct >= thresholdPercent;
+
+  const handleGenerateReport = async () => {
+    setInvitesError("");
+    setGeneratingReport(true);
+    try {
+      const response = await authedFetch("/api/org/reports", {
+        method: "POST",
+        body: JSON.stringify({ orgId, campaignId: campaign.id }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error ?? (await response.text()));
+      }
+      const data = (await response.json()) as { report: Report };
+      onReportGenerated?.(data.report);
+    } catch (error) {
+      console.error(error);
+      setInvitesError(
+        error instanceof Error ? error.message : "Could not generate intelligence report."
+      );
+    } finally {
+      setGeneratingReport(false);
+    }
+  };
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
@@ -687,6 +788,11 @@ function CampaignCard({
       </button>
       {expanded && (
         <div className="border-t border-gray-100 px-6 py-4">
+          {invitesError && (
+            <p className="mb-4 rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {invitesError}
+            </p>
+          )}
           <div className="mb-4 flex items-end gap-3">
             <div className="flex-1">
               <label className="mb-1 block text-sm font-medium text-gray-700">
@@ -720,13 +826,27 @@ function CampaignCard({
                     invite.link ??
                     (invite.token ? `${window.location.origin}/assess?token=${invite.token}` : "");
                   const isCopied = copiedLink === link;
+                  const isEditing = editingInviteId === invite.id;
+                  const isSaving = savingInviteId === invite.id;
+                  const isDeleting = deletingInviteId === invite.id;
+                  const canModify = invite.status === "pending";
                   return (
                     <div
                       key={invite.id}
                       className="flex items-center justify-between gap-2 rounded bg-white px-3 py-2"
                     >
-                      <div className="min-w-0">
-                        <span className="block truncate text-sm text-gray-700">{invite.email}</span>
+                      <div className="min-w-0 flex-1">
+                        {isEditing ? (
+                          <input
+                            type="email"
+                            value={editEmail}
+                            onChange={(event) => setEditEmail(event.target.value)}
+                            className="w-full rounded border border-gray-300 px-2 py-1 text-sm text-gray-700 focus:border-[#D97706] focus:outline-none focus:ring-1 focus:ring-[#D97706]"
+                            autoFocus
+                          />
+                        ) : (
+                          <span className="block truncate text-sm text-gray-700">{invite.email}</span>
+                        )}
                         {showTechnicalDetails && invite.lastEmailError && (
                           <span className="block truncate text-xs text-red-600">
                             {invite.lastEmailError}
@@ -741,35 +861,107 @@ function CampaignCard({
                         >
                           {invite.status}
                         </span>
-                        {showTechnicalDetails && (
-                          <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
-                            {invite.emailStatus ?? "pending"}
-                          </span>
-                        )}
-                        {link && (
-                          <button
-                            type="button"
-                            onClick={() => onCopyLink(link)}
-                            className="flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                          >
-                            {isCopied ? (
+                        {isEditing ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleSaveEditInvite(invite.id)}
+                              disabled={isSaving || !editEmail.trim()}
+                              aria-label="Save invite email"
+                              className="rounded p-1 text-green-600 hover:bg-green-50 disabled:opacity-50"
+                            >
+                              <Check className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleCancelEditInvite}
+                              disabled={isSaving}
+                              aria-label="Cancel editing invite"
+                              className="rounded p-1 text-gray-500 hover:bg-gray-100 disabled:opacity-50"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            {canModify && (
                               <>
-                                <Check className="h-3 w-3" />
-                                Copied
-                              </>
-                            ) : (
-                              <>
-                                <Copy className="h-3 w-3" />
-                                Copy link
+                                <button
+                                  type="button"
+                                  onClick={() => handleStartEditInvite(invite)}
+                                  aria-label={`Edit invite for ${invite.email}`}
+                                  className="rounded p-1 text-gray-500 hover:bg-gray-100"
+                                >
+                                  <Edit2 className="h-4 w-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteInvite(invite)}
+                                  disabled={isDeleting}
+                                  aria-label={`Delete invite for ${invite.email}`}
+                                  className="rounded p-1 text-red-500 hover:bg-red-50 disabled:opacity-50"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
                               </>
                             )}
-                          </button>
+                            {showTechnicalDetails && (
+                              <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
+                                {invite.emailStatus ?? "pending"}
+                              </span>
+                            )}
+                            {link && (
+                              <button
+                                type="button"
+                                onClick={() => onCopyLink(link)}
+                                className="flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                              >
+                                {isCopied ? (
+                                  <>
+                                    <Check className="h-3 w-3" />
+                                    Copied
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="h-3 w-3" />
+                                    Copy link
+                                  </>
+                                )}
+                              </button>
+                            )}
+                          </>
                         )}
                       </div>
                     </div>
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {invites.length > 0 && (
+            <div className="mt-4 flex flex-col gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Intelligence report</p>
+                <p className="text-xs text-gray-500">
+                  {reportEligible
+                    ? `${completed}/${total} completed — ready to generate`
+                    : `Requires ${thresholdPercent}% completion (${pct}% so far)`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleGenerateReport}
+                disabled={!reportEligible || generatingReport}
+                className="flex items-center justify-center gap-2 rounded-lg bg-[#D97706] px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
+              >
+                <FileText className="h-4 w-4" />
+                {generatingReport
+                  ? "Generating..."
+                  : hasReport
+                    ? "Regenerate intelligence report"
+                    : "Generate intelligence report"}
+              </button>
             </div>
           )}
         </div>
@@ -849,7 +1041,11 @@ function AnalysisSection({
       await onReportsChanged();
       setSelectedReport(data.report);
     } catch (generateError) {
-      setError(generateError instanceof Error ? generateError.message : "Could not generate report.");
+      setError(
+        generateError instanceof Error
+          ? generateError.message
+          : "Could not generate intelligence report."
+      );
     } finally {
       setGeneratingCampaignId(null);
     }
@@ -862,9 +1058,9 @@ function AnalysisSection({
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="text-xl font-semibold text-gray-900">Analysis & Reports</h2>
+        <h2 className="text-xl font-semibold text-gray-900">Analysis & Intelligence Reports</h2>
         <p className="mt-1 text-gray-600">
-          Generate reports once a campaign reaches {org.thresholdPercent}% completion.
+          Generate intelligence reports once a campaign reaches {org.thresholdPercent}% completion.
         </p>
       </div>
 
@@ -876,7 +1072,7 @@ function AnalysisSection({
 
       {reports.length > 0 && (
         <div className="space-y-3">
-          <h3 className="font-semibold text-gray-900">Generated reports</h3>
+          <h3 className="font-semibold text-gray-900">Generated intelligence reports</h3>
           {reports.map((report) => (
             <button
               key={report.id}
@@ -927,234 +1123,13 @@ function AnalysisSection({
                   disabled={!eligible || generatingCampaignId === campaign.id}
                   className="rounded-lg bg-[#D97706] px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
                 >
-                  {generatingCampaignId === campaign.id ? "Generating..." : "Generate report"}
+                  {generatingCampaignId === campaign.id
+                    ? "Generating..."
+                    : "Generate intelligence report"}
                 </button>
               </div>
             );
           })
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ReportView({ report, onBack }: { report: Report; onBack: () => void }) {
-  const noop = () => {};
-  const radarData = getRadarData(report.scores);
-  const stabilityColor =
-    report.averageScore >= 75 ? "#10B981" : report.averageScore >= 50 ? "#F59E0B" : "#EF4444";
-
-  const downloadCsv = () => {
-    const rows = [
-      ["Metric", "Score"],
-      ["Vision", report.scores.vision],
-      ["Alignment", report.scores.alignment],
-      ["Performance", report.scores.performance],
-      ["Cohesion", report.scores.cohesion],
-      ["Processes", report.scores.processes],
-      ["Scalability", report.scores.scalability],
-      ["Average", report.averageScore],
-      ["Completed", report.completionCount],
-      ["Invited", report.inviteCount],
-      ...report.contextVariables.map((item) => [
-        "Context Variable",
-        item.variableKey,
-        `"${item.question.replace(/"/g, '""')}"`,
-        item.averageScore,
-        item.count,
-      ]),
-      ...report.validationSignals.map((item) => [
-        "Validation Signal",
-        item.variableKey,
-        `"${item.question.replace(/"/g, '""')}"`,
-        item.averageScore,
-        item.count,
-      ]),
-      ...report.qualitativeResponses.map((response) => [
-        "Qualitative",
-        response.scoreKey ?? "",
-        response.variableKey ?? "",
-        `"${response.question.replace(/"/g, '""')}"`,
-        `"${response.answer.replace(/"/g, '""').replace(/\n/g, " ")}"`,
-      ]),
-    ];
-    const csv = rows.map((row) => row.join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${report.campaignName.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-report.csv`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-  };
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <button onClick={onBack} className="text-sm font-medium text-[#D97706] hover:underline">
-          Back to reports
-        </button>
-        <div className="flex gap-2">
-          <button
-            onClick={downloadCsv}
-            className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
-            <Download className="h-4 w-4" />
-            CSV
-          </button>
-          <button
-            onClick={() => window.print()}
-            className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
-            <Printer className="h-4 w-4" />
-            Print / PDF
-          </button>
-        </div>
-      </div>
-
-      <div>
-        <h2 className="mb-2 text-xl font-semibold text-gray-900">{report.campaignName} report</h2>
-        <p className="mb-6 text-sm text-gray-500">
-          {report.orgName} · Based on {report.completionCount} completed responses from{" "}
-          {report.inviteCount} invites
-        </p>
-        <ExecutiveHeader
-          averageScore={report.averageScore}
-          stabilityLabel={report.stabilityHeaderLabel}
-          stabilityColor={stabilityColor}
-        />
-        <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
-          <div className="space-y-6 lg:col-span-5">
-            <PillarCard
-              title="1. Vision & Alignment"
-              icon={Target}
-              inputs={[
-                { id: "vision", label: "Vision Clarity", value: report.scores.vision, onChange: noop },
-                {
-                  id: "alignment",
-                  label: "Strategic Alignment",
-                  value: report.scores.alignment,
-                  onChange: noop,
-                },
-              ]}
-            />
-            <PillarCard
-              title="2. Team Performance"
-              icon={Zap}
-              inputs={[
-                {
-                  id: "performance",
-                  label: "Execution Speed",
-                  value: report.scores.performance,
-                  onChange: noop,
-                },
-                { id: "cohesion", label: "Team Cohesion", value: report.scores.cohesion, onChange: noop },
-              ]}
-            />
-            <PillarCard
-              title="3. Systems & Structure"
-              icon={Component}
-              inputs={[
-                {
-                  id: "processes",
-                  label: "Process Efficiency",
-                  value: report.scores.processes,
-                  onChange: noop,
-                },
-                { id: "scalability", label: "Scalability", value: report.scores.scalability, onChange: noop },
-              ]}
-            />
-          </div>
-          <div className="lg:col-span-7">
-            <div className="relative flex h-full min-h-[400px] flex-col overflow-hidden rounded-3xl bg-[#1A1A1A] p-10 text-white shadow-2xl">
-              <div className="relative z-10 mb-8">
-                <h2 className="mb-2 text-3xl font-bold">Health Profile Analysis</h2>
-                <p className="text-sm text-gray-400">
-                  Aggregate organizational health profile. Individual responses are not exposed.
-                </p>
-              </div>
-              <div className="relative z-10 flex flex-1 items-center justify-center">
-                <RadarChart data={radarData} />
-              </div>
-              <StabilityBar
-                value={report.averageScore}
-                label={report.stabilityLabel}
-                barColor={stabilityColor}
-              />
-            </div>
-          </div>
-        </div>
-        {(report.contextVariables.length > 0 || report.validationSignals.length > 0) && (
-          <div className="mt-8 grid gap-6 lg:grid-cols-2">
-            {report.contextVariables.length > 0 && (
-              <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-                <h3 className="mb-2 text-lg font-semibold text-gray-900">
-                  Context variables
-                </h3>
-                <p className="mb-4 text-sm text-gray-500">
-                  These explain the operating environment and do not change the core score.
-                </p>
-                <div className="space-y-3">
-                  {report.contextVariables.map((item) => (
-                    <div key={item.variableKey} className="rounded-xl bg-gray-50 p-4">
-                      <div className="mb-1 flex items-center justify-between gap-3">
-                        <p className="text-sm font-semibold text-gray-900">{item.variableKey}</p>
-                        <span className="text-sm font-bold text-[#D97706]">
-                          {item.averageScore}%
-                        </span>
-                      </div>
-                      <p className="text-xs text-gray-500">{item.question}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            {report.validationSignals.length > 0 && (
-              <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-                <h3 className="mb-2 text-lg font-semibold text-gray-900">
-                  Validation checks
-                </h3>
-                <p className="mb-4 text-sm text-gray-500">
-                  These help compare responses against other signals in the survey.
-                </p>
-                <div className="space-y-3">
-                  {report.validationSignals.map((item) => (
-                    <div key={item.variableKey} className="rounded-xl bg-gray-50 p-4">
-                      <div className="mb-1 flex items-center justify-between gap-3">
-                        <p className="text-sm font-semibold text-gray-900">{item.variableKey}</p>
-                        <span className="text-sm font-bold text-[#D97706]">
-                          {item.averageScore}%
-                        </span>
-                      </div>
-                      <p className="text-xs text-gray-500">{item.question}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-        {report.qualitativeResponses.length > 0 && (
-          <div className="mt-8 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-            <h3 className="mb-2 text-lg font-semibold text-gray-900">
-              Qualitative context
-            </h3>
-            <p className="mb-4 text-sm text-gray-500">
-              Free-text responses are shown without employee names or emails.
-            </p>
-            <div className="space-y-4">
-              {report.qualitativeResponses.map((response, index) => (
-                <div key={index} className="rounded-xl bg-gray-50 p-4">
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                    {response.scoreKey ? `${response.scoreKey} pillar` : "qualitative"}
-                    {response.variableKey ? ` · ${response.variableKey}` : ""}
-                  </p>
-                  <p className="mb-2 text-sm font-medium text-gray-800">{response.question}</p>
-                  <p className="text-sm leading-relaxed text-gray-700">{response.answer}</p>
-                </div>
-              ))}
-            </div>
-          </div>
         )}
       </div>
     </div>
